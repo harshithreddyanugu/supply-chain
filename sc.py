@@ -1,4 +1,4 @@
-# Supply Chain Management Dashboard App (Streamlit) with Futuristic Cartoon Enhancements
+# Supply Chain Management Dashboard App (Streamlit)
 
 import streamlit as st
 import pandas as pd
@@ -10,15 +10,6 @@ st.set_page_config(
     layout="wide",
     page_icon="📦"
 )
-
-# Add Cartoon Header
-st.markdown("""
-    <div style='text-align: center;'>
-        <img src='https://i.imgur.com/W9aDz5j.gif' width='120'>
-        <h1 style='color: #4CAF50;'>🤖 Welcome to RoboSupply Dashboard</h1>
-        <p style='font-size:16px;'>Your AI-powered assistant for smarter supply chain decisions</p>
-    </div>
-""", unsafe_allow_html=True)
 
 # Upload CSV File
 st.sidebar.title("📁 Upload Supply Chain CSV")
@@ -35,7 +26,7 @@ if uploaded_file is not None:
             st.sidebar.markdown(f"- {col}")
 
         # Required columns check
-        required_cols = ['Product Type', 'Location', 'Supplier name']
+        required_cols = ['Product type', 'Location', 'Supplier name']
         missing_cols = [col for col in required_cols if col not in df.columns]
 
         if missing_cols:
@@ -60,21 +51,20 @@ if uploaded_file is not None:
         # Sidebar Filters
         st.sidebar.markdown("---")
         st.sidebar.header("🔍 Filters")
-        product = st.sidebar.selectbox("Select Product Type", df['Product Type'].unique())
+        product = st.sidebar.selectbox("Select Product Type", df['Product type'].unique())
         location = st.sidebar.selectbox("Select Location", df['Location'].unique())
         supplier = st.sidebar.selectbox("Select Supplier", df['Supplier name'].unique())
         show_data = st.sidebar.checkbox("📑 Show Raw Data")
 
         # Filtered Data
-        filtered_df = df[(df['Product Type'] == product) & (df['Location'] == location) & (df['Supplier name'] == supplier)]
+        filtered_df = df[(df['Product type'] == product) & (df['Location'] == location) & (df['Supplier name'] == supplier)]
 
         # HOME
         if menu == "🏠 Home":
-            st.title("🏠 Dashboard Overview")
-            st.image("https://i.imgur.com/DcG6pFw.png", width=100)
+            st.title("🚀 Welcome to the Futuristic SCM Dashboard")
             st.markdown("""
-            Dive into futuristic analytics with our robo-assistant 🤖. Monitor stock, suppliers, shipments and more.
-            Navigate using the sidebar and explore all dimensions of your supply chain 📦✨
+            This dashboard provides real-time insights to enhance your supply chain decisions 🧠📦.
+            Use the navigation bar to explore different dimensions.
             """)
 
         # EXECUTIVE SUMMARY
@@ -83,9 +73,8 @@ if uploaded_file is not None:
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("📦 Total Products Sold", int(filtered_df['Number of products sold'].sum()))
             col2.metric("💰 Total Revenue", f"${filtered_df['Revenue generated'].sum():,.2f}")
-            col3.metric("🔧 Avg. Defect Rate", f"{filtered_df['Defect rates'].mean():.2f}%")
+            col3.metric("📉 Avg. Defect Rate", f"{filtered_df['Defect rates'].mean():.2f}%")
             col4.metric("⏳ Avg. Lead Time", f"{filtered_df['Lead times'].mean():.1f} days")
-            st.image("https://i.imgur.com/4ZQnvtb.png", width=120)
 
         # WAREHOUSES
         elif menu == "🏢 Warehouses":
@@ -127,7 +116,7 @@ if uploaded_file is not None:
         # ITEMS
         elif menu == "🧾 Items":
             st.title("🧾 Item-wise Details")
-            st.dataframe(filtered_df[['SKU', 'Product Type', 'Stock levels', 'Availability', 'Revenue generated']])
+            st.dataframe(filtered_df[['SKU', 'Product type', 'Stock levels', 'Availability', 'Revenue generated']])
 
         # ADHOC
         elif menu == "🧪 Adhoc":
@@ -144,9 +133,12 @@ if uploaded_file is not None:
 
         # FOOTER
         st.markdown("---")
-        st.markdown("Made with ❤️ by SCM Innovators Team ✨ | 🤖 Powered by RoboSupply")
+        st.markdown("Made with ❤️ by SCM Innovators Team ✨")
 
     except Exception as e:
         st.error(f"❌ Error reading file: {e}")
 else:
     st.warning("📂 Please upload a CSV file to get started.")
+
+
+
