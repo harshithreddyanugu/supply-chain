@@ -11,16 +11,8 @@ st.set_page_config(
     page_icon="📦"
 )
 
-# File Upload
-st.sidebar.title("🧭 Navigation")
-uploaded_file = st.sidebar.file_uploader("📤 Upload Supply Chain CSV", type=["csv"])
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-else:
-    st.warning("⚠️ Please upload a CSV file to proceed.")
-    st.stop()
-
 # Sidebar Navigation
+st.sidebar.title("🧭 Navigation")
 menu = st.sidebar.radio("Go to", [
     "🏠 Home",
     "📊 Executive Summary",
@@ -34,12 +26,30 @@ menu = st.sidebar.radio("Go to", [
     "🧪 Adhoc"
 ])
 
+# File Upload
+uploaded_file = st.sidebar.file_uploader("📤 Upload Supply Chain CSV", type="csv")
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+else:
+    st.warning("⚠️ Please upload a CSV file to proceed.")
+    st.stop()
+
+# Check for required columns
+expected_cols = ['Product Type', 'Location', 'Supplier name']
+missing_cols = [col for col in expected_cols if col not in df.columns]
+
+if missing_cols:
+    st.error(f"❌ Missing required columns: {', '.join(missing_cols)}")
+    st.write("📋 Available columns in your CSV:")
+    st.write(list(df.columns))
+    st.stop()
+
 # Sidebar Filters
 st.sidebar.markdown("---")
 st.sidebar.header("🔍 Filters")
-product = st.sidebar.selectbox("Select Product Type", df['Product Type'].unique())
-location = st.sidebar.selectbox("Select Location", df['Location'].unique())
-supplier = st.sidebar.selectbox("Select Supplier", df['Supplier name'].unique())
+product = st.sidebar.selectbox("Select Product Type", df['Product Type'].dropna().unique())
+location = st.sidebar.selectbox("Select Location", df['Location'].dropna().unique())
+supplier = st.sidebar.selectbox("Select Supplier", df['Supplier name'].dropna().unique())
 show_data = st.sidebar.checkbox("📑 Show Raw Data")
 
 # Filtered Data
