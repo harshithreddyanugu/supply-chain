@@ -1,6 +1,6 @@
-streamlit==1.35.0
-pandas==2.2.2
-plotly==5.22.0
-numpy==1.26.4             # If you use numerical ops for forecasting or optimization
-scikit-learn==1.5.0       # For ML features like demand prediction
-openpyxl==3.1.2           # If importing/exporting Excel files
+streamlit>=1.30.0
+pandas>=2.0.0
+plotly>=5.10.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+openpyxl>=3.1.0
