@@ -1,4 +1,4 @@
-# Supply Chain Management Dashboard App (Streamlit)
+# Supply Chain Management Dashboard App (Streamlit) with Futuristic Cartoon Enhancements
 
 import streamlit as st
 import pandas as pd
@@ -10,6 +10,15 @@ st.set_page_config(
     layout="wide",
     page_icon="📦"
 )
+
+# Add Cartoon Header
+st.markdown("""
+    <div style='text-align: center;'>
+        <img src='https://i.imgur.com/W9aDz5j.gif' width='120'>
+        <h1 style='color: #4CAF50;'>🤖 Welcome to RoboSupply Dashboard</h1>
+        <p style='font-size:16px;'>Your AI-powered assistant for smarter supply chain decisions</p>
+    </div>
+""", unsafe_allow_html=True)
 
 # Upload CSV File
 st.sidebar.title("📁 Upload Supply Chain CSV")
@@ -61,10 +70,11 @@ if uploaded_file is not None:
 
         # HOME
         if menu == "🏠 Home":
-            st.title("🚀 Welcome to the Futuristic SCM Dashboard")
+            st.title("🏠 Dashboard Overview")
+            st.image("https://i.imgur.com/DcG6pFw.png", width=100)
             st.markdown("""
-            This dashboard provides real-time insights to enhance your supply chain decisions 🧠📦.
-            Use the navigation bar to explore different dimensions.
+            Dive into futuristic analytics with our robo-assistant 🤖. Monitor stock, suppliers, shipments and more.
+            Navigate using the sidebar and explore all dimensions of your supply chain 📦✨
             """)
 
         # EXECUTIVE SUMMARY
@@ -73,8 +83,9 @@ if uploaded_file is not None:
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("📦 Total Products Sold", int(filtered_df['Number of products sold'].sum()))
             col2.metric("💰 Total Revenue", f"${filtered_df['Revenue generated'].sum():,.2f}")
-            col3.metric("📉 Avg. Defect Rate", f"{filtered_df['Defect rates'].mean():.2f}%")
+            col3.metric("🔧 Avg. Defect Rate", f"{filtered_df['Defect rates'].mean():.2f}%")
             col4.metric("⏳ Avg. Lead Time", f"{filtered_df['Lead times'].mean():.1f} days")
+            st.image("https://i.imgur.com/4ZQnvtb.png", width=120)
 
         # WAREHOUSES
         elif menu == "🏢 Warehouses":
@@ -133,7 +144,7 @@ if uploaded_file is not None:
 
         # FOOTER
         st.markdown("---")
-        st.markdown("Made with ❤️ by SCM Innovators Team ✨")
+        st.markdown("Made with ❤️ by SCM Innovators Team ✨ | 🤖 Powered by RoboSupply")
 
     except Exception as e:
         st.error(f"❌ Error reading file: {e}")
