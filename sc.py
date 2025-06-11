@@ -4,15 +4,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Load dataset
-@st.cache_data
-
-def load_data():
-    df = pd.read_csv("/mnt/data/supply_chain_data (1).csv")
-    return df
-
-df = load_data()
-
 # Page setup
 st.set_page_config(
     page_title="🚀 Futuristic Supply Chain Dashboard",
@@ -20,8 +11,16 @@ st.set_page_config(
     page_icon="📦"
 )
 
-# Sidebar Navigation
+# File Upload
 st.sidebar.title("🧭 Navigation")
+uploaded_file = st.sidebar.file_uploader("📤 Upload Supply Chain CSV", type=["csv"])
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+else:
+    st.warning("⚠️ Please upload a CSV file to proceed.")
+    st.stop()
+
+# Sidebar Navigation
 menu = st.sidebar.radio("Go to", [
     "🏠 Home",
     "📊 Executive Summary",
@@ -121,4 +120,3 @@ if show_data:
 # FOOTER
 st.markdown("---")
 st.markdown("Made with ❤️ by SCM Innovators Team ✨")
-
