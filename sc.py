@@ -324,8 +324,10 @@ def process_csv_data(df):
     # Add a dummy 'Date' column if not present. For time series, a single date per row isn't ideal but necessary for now.
     # In a real scenario, 'Date' would likely be part of the historical inventory data.
     if 'Date' not in df.columns:
-        df['Date'] = datetime.date.today()
+        # Create a Series of today's date, converted to datetime objects for consistency
+        df['Date'] = pd.to_datetime([datetime.date.today()] * len(df))
     else:
+        # Ensure the existing 'Date' column is converted to datetime
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df.dropna(subset=['Date'], inplace=True) # Drop rows where Date parsing failed
 
@@ -1103,7 +1105,7 @@ def main():
         if selected_nav == 'Home':
             HomeContent(dashboard_data)
         elif selected_nav == 'Executive Summary':
-            ExecutiveSummaryContent(dashboard_data)
+            ExecutiveSummaryContent(dashboard)
         elif selected_nav == 'Warehouses':
             WarehousesContent(dashboard_data)
         elif selected_nav == 'Availability':
