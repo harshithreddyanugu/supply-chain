@@ -34,12 +34,12 @@ def generate_dummy_data():
     at_stock = int(total_items * (np.random.rand() * 0.3 + 0.25))
     over_stock = total_items - stock_out - below_safety_stock - at_stock
 
-    inventory_status_data = pd.DataFrame([
+    inventory_status_data = [
         {'name': 'STOCK-OUT', 'value': stock_out, 'color': '#DC2626'},
         {'name': 'BELOW SAFETY STOCK', 'value': below_safety_stock, 'color': '#F59E0B'},
         {'name': 'AT-STOCK', 'value': at_stock, 'color': '#10B981'},
         {'name': 'OVER-STOCK', 'value': over_stock, 'color': '#6366F1'},
-    ])
+    ]
 
     today = datetime.date.today()
     months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -274,7 +274,7 @@ def generate_dummy_data():
         'inventoryStatus': {
             'totalItems': total_items,
             'totalPositions': total_positions,
-            'breakdown': inventory_status_data,
+            'breakdown': inventory_status_data, # This is now a list of dicts
         },
         'executiveSummary': {
             'inventoryEvolution': inventory_evolution_data,
@@ -297,7 +297,7 @@ def generate_dummy_data():
 def process_csv_data(df):
     """Processes pandas DataFrame from CSV to dashboard data structure."""
     if df.empty:
-        st.warning("CSV data is empty or invalid, using dummy data.")
+        st.warning("CSV data is empty or invalid. Displaying dummy data for demonstration.")
         return generate_dummy_data()
 
     # Ensure numeric columns are actually numeric, handling errors
@@ -414,7 +414,7 @@ def process_csv_data(df):
     availability_data_processed['theoreticalOnHandQuantity'] = [{
         'date': (today + datetime.timedelta(days=i)).strftime('%b %d'),
         'value': np.random.randint(100, 300)
-    } for i in range(20)]
+    } for i in range(20)],
 
 
     # --- Excess Stock Data ---
@@ -554,7 +554,7 @@ def process_csv_data(df):
         'inventoryStatus': {
             'totalItems': total_items_count,
             'totalPositions': total_positions_count,
-            'breakdown': inventory_status_breakdown.to_dict('records'),
+            'breakdown': inventory_status_breakdown.to_dict('records'), # This is already a list of dicts from .to_dict('records')
         },
         'executiveSummary': executive_summary_data,
         'warehouses': warehouses_data,
@@ -588,6 +588,7 @@ def HomeContent(data):
     with col_items:
         st.markdown(f"<h1 style='text-align: center; color: #3b82f6;'>{data['inventoryStatus']['totalItems']}</h1><p style='text-align: center;'>Items</p>", unsafe_allow_html=True)
     with col_chart:
+        # Ensure data['inventoryStatus']['breakdown'] is a list of dicts here
         fig = px.bar(data['inventoryStatus']['breakdown'], y='name', x='value', orientation='h',
                      color='name', color_discrete_map={item['name']: item['color'] for item in data['inventoryStatus']['breakdown']},
                      height=150, title="", labels={'value': '', 'name': ''})
@@ -1009,7 +1010,6 @@ def main():
         """, unsafe_allow_html=True)
 
 
-        # Use an index for the radio button to reset selection when file is uploaded
         current_nav_index = st.session_state.get('nav_index', 0)
         nav_options = ['Home', 'Executive Summary', 'Warehouses', 'Availability', 'Excess Stock', 'Missing Stock', 'Historical Status', 'Stock Coverage', 'Item', 'Adhoc']
         selected_nav = st.radio("Navigation", nav_options, index=current_nav_index, key="main_nav")
@@ -1025,17 +1025,25 @@ def main():
             st.session_state['nav_index'] = nav_options.index(selected_nav) # Keep current tab after upload
             st.success("CSV loaded successfully!")
         except Exception as e:
-            st.error(f"Error processing CSV: {e}. Falling back to dummy data.")
-            dashboard_data = generate_dummy_data()
-            st.session_state['dashboard_data'] = dashboard_data
-            st.session_state['nav_index'] = nav_options.index(selected_nav)
+            st.error(f"Error processing CSV: {e}. Please ensure it's a valid CSV with expected columns. Dashboard content cleared.")
+            if 'dashboard_data' in st.session_state:
+                del st.session_state['dashboard_data'] # Clear previous data if error
+            dashboard_data = generate_dummy_data() # Fallback to dummy for demo purposes
+            dashboard_data['isLoadedFromCSV'] = False # Ensure flag is set for dummy data
+    elif 'dashboard_data' in st.session_state:
+        # If no new file uploaded, but data exists from a previous successful upload
+        dashboard_data = st.session_state['dashboard_data']
     else:
-        # Load dummy data if no file is uploaded or if there was an error in a previous upload
-        if 'dashboard_data' not in st.session_state:
-            dashboard_data = generate_dummy_data()
-            st.session_state['dashboard_data'] = dashboard_data
-        else:
-            dashboard_data = st.session_state['dashboard_data']
+        # No file uploaded yet, and no previous data in session state
+        st.info("Please upload your supply chain data CSV file to view your own data. A demo dashboard is displayed below.")
+        dashboard_data = generate_dummy_data() # Display dummy data as initial demo
+        dashboard_data['isLoadedFromCSV'] = False # Ensure flag is set for dummy data
+
+    # Display status of loaded data
+    if dashboard_data and dashboard_data.get('isLoadedFromCSV', False):
+        st.sidebar.markdown("<p style='color: #4CAF50; font-weight: bold; margin-top: 1rem;'>✅ Displaying your CSV data</p>", unsafe_allow_html=True)
+    else:
+        st.sidebar.markdown("<p style='color: #FFC107; font-weight: bold; margin-top: 1rem;'>⚠️ Displaying demo data</p>", unsafe_allow_html=True)
 
     # --- Main Content Area ---
     if dashboard_data:
@@ -1060,7 +1068,8 @@ def main():
         elif selected_nav == 'Adhoc':
             AdhocContent(dashboard_data)
     else:
-        st.info("Upload a CSV file to begin, or dummy data will load shortly.")
+        # This block should ideally not be reached if generate_dummy_data is always called as fallback
+        st.info("Loading dashboard content...")
 
 
 if __name__ == "__main__":
