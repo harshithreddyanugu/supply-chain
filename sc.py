@@ -1088,23 +1088,26 @@ def main():
         if 'file_data_input' not in st.session_state:
             st.session_state.file_data_input = []
 
-        # Logic to handle new uploads or preserve existing inputs
+        # Create a temporary list to hold the new state of file data
+        new_file_data_input = []
         if uploaded_files:
-            # Check if current uploaded_files list is different from previous one
-            # This helps in preventing re-rendering date inputs for already processed files
-            if len(uploaded_files) != len(st.session_state.file_data_input) or \
-               any(file.name not in [f['name'] for f in st.session_state.file_data_input] for file in uploaded_files):
-                st.session_state.file_data_input = [] # Reset if files change
-                for file in uploaded_files:
-                    st.session_state.file_data_input.append({
-                        'name': file.name,
-                        'file_object': file,
-                        'date': datetime.date.today() # Default date
-                    })
-        else:
-            # If no files are currently uploaded, clear the state for file data
-            if 'file_data_input' in st.session_state and st.session_state.file_data_input:
-                st.session_state.file_data_input = []
+            # Create a dictionary for quick lookup of existing file dates by name
+            existing_file_dates = {f['name']: f['date'] for f in st.session_state.file_data_input}
+
+            for file in uploaded_files:
+                file_name = file.name
+                # If the file already exists in session state, use its previous date
+                # Otherwise, default to today's date
+                file_date = existing_file_dates.get(file_name, datetime.date.today())
+                
+                new_file_data_input.append({
+                    'name': file_name,
+                    'file_object': file,
+                    'date': file_date
+                })
+        
+        # Update the session state with the new list of file data
+        st.session_state.file_data_input = new_file_data_input
 
 
         processed_data_list = []
