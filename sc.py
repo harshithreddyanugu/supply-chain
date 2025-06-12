@@ -1,126 +1,117 @@
-# Supply Chain Management Dashboard App (Streamlit)
-
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 
-# Page setup
-st.set_page_config(
-    page_title="🚀 Futuristic Supply Chain Dashboard",
-    layout="wide",
-    page_icon="📦"
-)
+# Generate dummy data
+def generate_dummy_data():
+    current_inventory_value = np.random.randint(20, 30) * 1_000_000  # $20M - $30M
+    missing_stock_amount = np.random.randint(1, 7) * 1_000_000        # $1M - $7M
+    excess_stock_value = np.random.randint(1, 3) * 1_000_000          # $1M - $3M
 
-# Upload CSV File
-st.sidebar.title("📁 Upload Supply Chain CSV")
-uploaded_file = st.sidebar.file_uploader("Upload your CSV file", type=["csv"])
+    total_items = np.random.randint(50, 100)
+    total_positions = np.random.randint(200, 300)
 
-if uploaded_file is not None:
-    try:
-        df = pd.read_csv(uploaded_file)
-        df.columns = df.columns.str.strip()
+    stock_out = int(total_items * np.random.uniform(0.05, 0.15))
+    below_safety_stock = int(total_items * np.random.uniform(0.15, 0.35))
+    at_stock = int(total_items * np.random.uniform(0.25, 0.55))
+    over_stock = total_items - stock_out - below_safety_stock - at_stock
 
-        st.sidebar.markdown("### 🧾 Available Columns")
-        for col in df.columns:
-            st.sidebar.markdown(f"- {col}")
+    inventory_status_data = pd.DataFrame({
+        'Status': ['STOCK-OUT', 'BELOW SAFETY STOCK', 'AT-STOCK', 'OVER-STOCK'],
+        'Count': [stock_out, below_safety_stock, at_stock, over_stock],
+        'Color': ['#DC2626', '#F59E0B', '#10B981', '#6366F1']
+    })
 
-        # Navigation
-        st.sidebar.title("🧭 Navigation")
-        menu = st.sidebar.radio("Go to", [
-            "🏠 Home",
-            "📊 Executive Summary",
-            "🏢 Warehouses",
-            "📦 Availability",
-            "📈 Excessive Stock",
-            "🚫 Missing Stock",
-            "📚 Historical Status",
-            "📉 Stock Coverage",
-            "🧾 Items",
-            "🧪 Adhoc"
-        ])
+    return {
+        'kpis': {
+            'inventory_value': current_inventory_value,
+            'missing_stock_amount': missing_stock_amount,
+            'excess_stock_value': excess_stock_value
+        },
+        'inventory_status': {
+            'total_items': total_items,
+            'total_positions': total_positions,
+            'breakdown': inventory_status_data
+        }
+    }
 
-        # Filters
-        st.sidebar.markdown("---")
-        st.sidebar.header("🔍 Filters")
-        product = st.sidebar.selectbox("Select Product Type", df['Product type'].unique())
-        location = st.sidebar.selectbox("Select Location", df['Location'].unique())
-        supplier = st.sidebar.selectbox("Select Supplier", df['Supplier name'].unique())
-        show_data = st.sidebar.checkbox("📑 Show Raw Data")
+# Initialize dashboard data
+dashboard_data = generate_dummy_data()
 
-        filtered_df = df[(df['Product type'] == product) & 
-                         (df['Location'] == location) & 
-                         (df['Supplier name'] == supplier)]
+# Streamlit Layout
+st.set_page_config(page_title="Inventory Dashboard", layout="wide")
 
-        if menu == "🏠 Home":
-            st.title("🚀 Welcome to the Futuristic SCM Dashboard")
-            st.markdown("""
-            Gain insights and take action on your supply chain performance 🌍⚙️.
-            Use the navigation sidebar to explore each key aspect of your operations.
-            """)
+# Sidebar - Navigation
+st.sidebar.title("Salesforce Inventory")
+st.sidebar.image("https://placehold.co/80x80/cccccc/333333?text=User", width=80)
+st.sidebar.write("Welcome, User!")
+nav_options = ['Home', 'Executive Summary', 'Warehouses', 'Availability', 'Excess Stock',
+               'Missing Stock', 'Historical Status', 'Stock Coverage', 'Item', 'Adhoc']
+active_nav = st.sidebar.radio("Navigate", nav_options)
 
-        elif menu == "📊 Executive Summary":
-            st.title("📊 Executive Summary")
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("🧮 Products Sold", int(filtered_df['Number of products sold'].sum()))
-            col2.metric("💸 Revenue", f"${filtered_df['Revenue generated'].sum():,.2f}")
-            col3.metric("⚠️ Avg. Defect Rate", f"{filtered_df['Defect rates'].mean():.2f}%")
-            col4.metric("⏱️ Avg. Lead Time", f"{filtered_df['Lead times'].mean():.1f} days")
+# Main content
+st.title("📦 Inventory Dashboard")
 
-        elif menu == "🏢 Warehouses":
-            st.title("🏢 Warehouse Distribution")
-            fig = px.histogram(filtered_df, x='Location', y='Stock levels', color='Product type', barmode='group')
-            st.plotly_chart(fig, use_container_width=True)
+# KPI Cards
+col1, col2, col3 = st.columns(3)
+col1.metric("Inventory Value", f"${dashboard_data['kpis']['inventory_value'] / 1_000_000:.2f}M")
+col2.metric("Missing Stock Amount", f"${dashboard_data['kpis']['missing_stock_amount'] / 1_000_000:.2f}M", delta=None)
+col3.metric("Excess Stock Value", f"${dashboard_data['kpis']['excess_stock_value'] / 1_000_000:.2f}M")
 
-        elif menu == "📦 Availability":
-            st.title("📦 Item Availability")
-            fig = px.bar(filtered_df, x='SKU', y='Stock levels', color='Availability',
-                         title='Stock Levels by SKU')
-            st.plotly_chart(fig, use_container_width=True)
+st.markdown("---")
 
-        elif menu == "📈 Excessive Stock":
-            st.title("📈 Excessive Stock")
-            excess_df = filtered_df[filtered_df['Stock levels'] > 75]
-            fig = px.bar(excess_df, x='SKU', y='Stock levels', color='Location')
-            st.plotly_chart(fig, use_container_width=True)
+# Inventory Status Section
+st.subheader("Inventory Status as of June 12, 2025")
 
-        elif menu == "🚫 Missing Stock":
-            st.title("🚫 Missing Stock")
-            missing_df = filtered_df[filtered_df['Stock levels'] < 10]
-            fig = px.bar(missing_df, x='SKU', y='Stock levels', color='Location')
-            st.plotly_chart(fig, use_container_width=True)
+col_items, col_chart = st.columns([1, 3])
+with col_items:
+    st.metric("Total Items", dashboard_data['inventory_status']['total_items'])
+    st.metric("Total Positions", dashboard_data['inventory_status']['total_positions'])
 
-        elif menu == "📚 Historical Status":
-            st.title("📚 Historical Inventory Trends")
-            st.line_chart(filtered_df[['Stock levels', 'Lead times']])
+with col_chart:
+    fig = px.bar(
+        dashboard_data['inventory_status']['breakdown'],
+        x='Count',
+        y='Status',
+        orientation='h',
+        color='Status',
+        color_discrete_map={
+            'STOCK-OUT': '#DC2626',
+            'BELOW SAFETY STOCK': '#F59E0B',
+            'AT-STOCK': '#10B981',
+            'OVER-STOCK': '#6366F1'
+        },
+        height=400
+    )
+    fig.update_layout(showlegend=False, yaxis_title=None, xaxis_title=None)
+    st.plotly_chart(fig, use_container_width=True)
 
-        elif menu == "📉 Stock Coverage":
-            st.title("📉 Stock Coverage")
-            st.bar_chart(filtered_df['Stock levels'])
+st.markdown("---")
 
-        elif menu == "🧾 Items":
-            st.title("🧾 Detailed Item View")
-            st.dataframe(filtered_df[[
-                'SKU', 'Product type', 'Availability', 'Stock levels', 'Price',
-                'Revenue generated', 'Lead times', 'Manufacturing costs'
-            ]])
+# Action Buttons (Streamlit buttons don't support inline icons but we simulate)
+st.subheader("What do you want to do?")
 
-        elif menu == "🧪 Adhoc":
-            st.title("🧪 Adhoc Analysis")
-            fig = px.scatter(filtered_df, 
-                             x='Manufacturing lead time', y='Manufacturing costs', 
-                             size='Revenue generated', color='Defect rates', 
-                             hover_data=['SKU'],
-                             title='Lead Time vs Cost vs Defect Rate')
-            st.plotly_chart(fig, use_container_width=True)
+action_cols = st.columns(3)
+if action_cols[0].button("Assess 🔍"):
+    st.success("Assess clicked!")
 
-        if show_data:
-            st.subheader("📋 Raw Filtered Data")
-            st.dataframe(filtered_df)
+if action_cols[1].button("Evaluate 📊"):
+    st.success("Evaluate clicked!")
 
-        st.markdown("---")
-        st.markdown("Made with ❤️ by SCM Innovators ✨")
+if action_cols[2].button("Reduce Risks ⚠️"):
+    st.success("Reduce Risks clicked!")
 
-    except Exception as e:
-        st.error(f"❌ Error reading file: {e}")
-else:
-    st.warning("📂 Please upload a CSV file to get started.")
+action_cols2 = st.columns(3)
+if action_cols2[0].button("Optimize ⚙️"):
+    st.success("Optimize clicked!")
+
+if action_cols2[1].button("Assess Improvements 📈"):
+    st.success("Assess Improvements clicked!")
+
+if action_cols2[2].button("Deep-dive 🔬"):
+    st.success("Deep-dive clicked!")
+
+st.markdown("---")
+st.button("🚀 Start")
+
