@@ -304,7 +304,7 @@ def process_single_csv(df, current_date):
         'Stock levels': 'On-hand Quantity',
         'Location': 'Warehouse',
         'SKU': 'Item',
-        'Product type': 'Item Family',
+        'Product type': 'Item Family', # Renaming 'Product type' to 'Item Family'
         'Price': 'Price',
     }
     df = df.rename(columns=column_mapping)
@@ -351,9 +351,14 @@ def process_single_csv(df, current_date):
         df.loc[df['Excess Stock Value'] > 0, 'Calculated Stock Status'] = 'OVER-STOCK'
         df.loc[df['Calculated Stock Status'] == 'UNKNOWN', 'Calculated Stock Status'] = 'AT-STOCK'
     
+    # Ensure 'Item Family' is present after renaming
+    if 'Item Family' not in df.columns:
+        # Fallback or create an empty 'Item Family' column if original 'Product type' was missing
+        df['Item Family'] = 'Unknown' 
+
     return df[['Date', 'Item', 'Warehouse', 'On-hand Quantity', 'Price', 'Inventory Value', 
                'Safety Stock', 'Missing Stock Amount', 'Excess Stock Value', 'Calculated Stock Status', 
-               'Product type', 'Item Family']] # Return necessary columns
+               'Item Family']] # Corrected: use 'Item Family' instead of 'Product type'
 
 # --- Data Aggregation and Dashboard Data Generation (for all uploaded files) ---
 
