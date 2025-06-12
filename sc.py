@@ -610,14 +610,9 @@ def HomeContent(data):
     cols = st.columns(len(actions))
     for i, (text, svg_path) in enumerate(actions):
         with cols[i]:
-            st.button(f"""
-                <div style="display: flex; align-items: center; justify-content: center; padding: 0.75rem; border-radius: 0.5rem; background-color: #e0f2fe; color: #1e40af; font-weight: 600; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); transition: all 0.2s ease;">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 20px; height: 20px; margin-right: 8px;">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{svg_path}" />
-                    </svg>
-                    {text}
-                </div>
-            """, key=f"action_btn_{text}", use_container_width=True, help=f"Click to {text}", unsafe_allow_html=True)
+            # Removed HTML from button label, keeping only the text.
+            # Custom styling for buttons in Streamlit typically requires custom components or careful CSS injection.
+            st.button(text, key=f"action_btn_{text}", use_container_width=True, help=f"Click to {text}")
 
 
 def ExecutiveSummaryContent(data):
