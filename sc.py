@@ -300,29 +300,80 @@ def process_csv_data(df):
         # If CSV is empty, return an empty dataset that signals no data is loaded
         return None
 
-    # Ensure numeric columns are actually numeric, handling errors
-    for col in ['Inventory Value', 'Total Value', 'On-hand Quantity', 'Stock Quantity',
-                'Safety Stock', 'Missing Stock Amount', 'Excess Stock Value',
-                'Inflow Quantity', 'Outflow Quantity']:
+    # --- Rename and Prepare Columns ---
+    # Map CSV columns to expected dashboard column names
+    column_mapping = {
+        'Stock levels': 'On-hand Quantity',
+        'Location': 'Warehouse',
+        'SKU': 'Item',
+        'Product type': 'Item Family',
+        'Price': 'Price', # Keep 'Price' as it's needed for calculation
+    }
+
+    # Rename columns that exist in the mapping
+    df = df.rename(columns=column_mapping)
+
+    # Ensure critical numerical columns are numeric, handling errors
+    for col in ['Price', 'On-hand Quantity']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        else:
+            st.warning(f"Required column '{col}' not found in CSV. Some calculations might be affected.")
+            df[col] = 0 # Default to 0 if column is missing
+
+    # Add a dummy 'Date' column if not present. For time series, a single date per row isn't ideal but necessary for now.
+    # In a real scenario, 'Date' would likely be part of the historical inventory data.
+    if 'Date' not in df.columns:
+        df['Date'] = datetime.date.today()
+    else:
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        df.dropna(subset=['Date'], inplace=True) # Drop rows where Date parsing failed
+
+    # Calculate Inventory Value
+    df['Inventory Value'] = df['Price'] * df['On-hand Quantity']
+
+    # Derive Safety Stock (as a simple heuristic, e.g., 20% of on-hand quantity)
+    # This is a placeholder; a real Safety Stock would come from business rules or demand forecasting.
+    df['Safety Stock'] = df['On-hand Quantity'] * 0.2
+    df['Safety Stock'] = df['Safety Stock'].apply(lambda x: max(0, x)) # Ensure non-negative
+
+    # Derive Missing Stock Amount
+    df['Missing Stock Amount'] = np.where(
+        df['On-hand Quantity'] < df['Safety Stock'],
+        (df['Safety Stock'] - df['On-hand Quantity']) * df['Price'],
+        0
+    )
+
+    # Derive Excess Stock Value
+    # Arbitrary threshold: if On-hand is more than 150% of Safety Stock, consider it excess.
+    # This is a placeholder; a real Excess Stock definition is business-specific.
+    df['Excess Stock Value'] = np.where(
+        df['On-hand Quantity'] > df['Safety Stock'] * 1.5,
+        (df['On-hand Quantity'] - df['Safety Stock'] * 1.5) * df['Price'],
+        0
+    )
+
 
     # --- KPIs ---
-    total_inventory_value = df.get('Inventory Value', df.get('Total Value', pd.Series([0]))).sum()
-    total_missing_stock_amount = df.get('Missing Stock Amount', pd.Series([0])).sum()
-    total_excess_stock_value = df.get('Excess Stock Value', pd.Series([0])).sum()
+    total_inventory_value = df['Inventory Value'].sum()
+    total_missing_stock_amount = df['Missing Stock Amount'].sum()
+    total_excess_stock_value = df['Excess Stock Value'].sum()
     total_items_count = len(df)
     total_positions_count = len(df) # Assuming each row is a position
 
     # --- Inventory Status Breakdown ---
     df['Calculated Stock Status'] = 'UNKNOWN'
     if 'Stock Status' in df.columns:
-        df['Calculated Stock Status'] = df['Stock Status'].str.upper().str.replace(' ', '-')
+        # Use existing 'Stock Status' if provided in CSV
+        df['Calculated Stock Status'] = df['Stock Status'].astype(str).str.upper().str.replace(' ', '-')
     else:
+        # Derive if 'Stock Status' is not in CSV
         df.loc[df['On-hand Quantity'] <= 0, 'Calculated Stock Status'] = 'STOCK-OUT'
         df.loc[(df['On-hand Quantity'] > 0) & (df['On-hand Quantity'] < df['Safety Stock']), 'Calculated Stock Status'] = 'BELOW-SAFETY-STOCK'
         df.loc[df['Excess Stock Value'] > 0, 'Calculated Stock Status'] = 'OVER-STOCK'
-        df.loc[df['Calculated Stock Status'] == 'UNKNOWN', 'Calculated Stock Status'] = 'AT-STOCK' # Default for others
+        # Any items not falling into the above categories are 'AT-STOCK'
+        df.loc[df['Calculated Stock Status'] == 'UNKNOWN', 'Calculated Stock Status'] = 'AT-STOCK'
+
 
     inventory_status_breakdown = df['Calculated Stock Status'].value_counts().reset_index()
     inventory_status_breakdown.columns = ['name', 'value']
@@ -336,9 +387,6 @@ def process_csv_data(df):
     inventory_status_breakdown['color'] = inventory_status_breakdown['name'].map(color_map)
 
     # --- Executive Summary ---
-    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-    df.dropna(subset=['Date'], inplace=True) # Drop rows where Date parsing failed
-
     executive_summary_data = {
         'inventoryEvolution': [],
         'warehouseSummary': [],
@@ -369,12 +417,12 @@ def process_csv_data(df):
     # --- Warehouses Data ---
     warehouses_data = []
     for index, row in warehouse_grouped.iterrows():
-        wh_df = df[df['Warehouse'] == row['Warehouse']]
+        wh_df = df[df['Warehouse'] == row['name']] # Use row['name'] as 'Warehouse' is renamed
         stock_breakdown_wh = wh_df['Calculated Stock Status'].value_counts().reset_index()
         stock_breakdown_wh.columns = ['name', 'value']
         stock_breakdown_wh['color'] = stock_breakdown_wh['name'].map(color_map)
         warehouses_data.append({
-            'name': row['Warehouse'],
+            'name': row['name'], # Use row['name']
             'inventoryValue': row['inventoryValue'],
             'excessStock': row['excessStock'],
             'missingStock': row['missingStock'],
@@ -623,7 +671,11 @@ def ExecutiveSummaryContent(data):
         st.subheader("Inventory Status by Warehouse")
         for wh in data['executiveSummary']['warehouseSummary']:
             st.markdown(f"**{wh['name']}**")
-            st.progress(wh['positions'] / 50, text=f"{wh['positions']} positions") # Assuming max 50 for progress bar
+            # Ensure positions is not zero before division
+            if wh['positions'] > 0:
+                st.progress(wh['positions'] / 50, text=f"{wh['positions']} positions") # Assuming max 50 for progress bar
+            else:
+                st.progress(0, text="0 positions")
     with col2:
         st.subheader("Evolution of our inventory Items")
         df_item_evolution = pd.DataFrame(data['executiveSummary']['itemEvolution'])
@@ -699,7 +751,11 @@ def AvailabilityContent(data):
         st.subheader("Forecast: Next Stock-out Items")
         for forecast in data['availability']['stockOutForecast']:
             st.write(f"{forecast['range']} ({forecast['items']} items)")
-            st.progress(forecast['items'] / 10) # Max 10 items for progress bar
+            # Ensure items is not zero for division, also handle the case where forecast['items'] might be 0
+            if forecast['items'] > 0:
+                st.progress(forecast['items'] / 10) # Max 10 items for progress bar
+            else:
+                st.progress(0)
     with col2:
         st.subheader("Forecast: Items to Stock-out Soon")
         df_stock_out_soon = pd.DataFrame(data['availability']['itemsToStockOutSoon'])
