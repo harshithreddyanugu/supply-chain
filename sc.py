@@ -419,12 +419,13 @@ def process_csv_data(df):
     # --- Warehouses Data ---
     warehouses_data = []
     for index, row in warehouse_grouped.iterrows():
-        wh_df = df[df['Warehouse'] == row['name']] # Use row['name'] as 'Warehouse' is renamed
+        # Corrected: Access 'Warehouse' column directly as it's the actual column name in warehouse_grouped DataFrame
+        wh_df = df[df['Warehouse'] == row['Warehouse']]
         stock_breakdown_wh = wh_df['Calculated Stock Status'].value_counts().reset_index()
         stock_breakdown_wh.columns = ['name', 'value']
         stock_breakdown_wh['color'] = stock_breakdown_wh['name'].map(color_map)
         warehouses_data.append({
-            'name': row['name'], # Use row['name']
+            'name': row['Warehouse'], # Corrected: Use 'Warehouse' column from row Series
             'inventoryValue': row['inventoryValue'],
             'excessStock': row['excessStock'],
             'missingStock': row['missingStock'],
@@ -1105,7 +1106,7 @@ def main():
         if selected_nav == 'Home':
             HomeContent(dashboard_data)
         elif selected_nav == 'Executive Summary':
-            ExecutiveSummaryContent(dashboard)
+            ExecutiveSummaryContent(dashboard_data) # Corrected: passed dashboard_data
         elif selected_nav == 'Warehouses':
             WarehousesContent(dashboard_data)
         elif selected_nav == 'Availability':
