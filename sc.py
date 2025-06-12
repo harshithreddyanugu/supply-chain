@@ -646,6 +646,13 @@ def DayToDayComparisonContent(data):
         comparison_df['Quantity Change'] = comparison_df[qty_col2] - comparison_df[qty_col1]
         comparison_df['Value Change'] = comparison_df[f'Inventory Value_{date2.strftime("%Y%m%d")}'].fillna(0) - comparison_df[f'Inventory Value_{date1.strftime("%Y%m%d")}'].fillna(0)
 
+        # Prepare arguments for assign method
+        assign_kwargs = {
+            f'Inventory Value_{date1.strftime("%Y%m%d")}': comparison_df[f'Inventory Value_{date1.strftime("%Y%m%d")}'].fillna(0).apply(format_currency_k),
+            f'Inventory Value_{date2.strftime("%Y%m%d")}': comparison_df[f'Inventory Value_{date2.strftime("%Y%m%d")}'].fillna(0).apply(format_currency_k),
+            'Value Change': comparison_df['Value Change'].apply(format_currency_k)
+        }
+
         # Select relevant columns for display
         display_cols = [
             'Quantity Change',
@@ -658,11 +665,10 @@ def DayToDayComparisonContent(data):
         if qty_col2 in comparison_df.columns:
             display_cols.insert(1, qty_col2)
 
-        st.dataframe(comparison_df[display_cols].reset_index().assign(
-            **{f'Inventory Value_{date1.strftime("%Y%m%d")}': comparison_df[f'Inventory Value_{date1.strftime("%Y%m%d")}'].fillna(0).apply(format_currency_k)},
-            **{f'Inventory Value_{date2.strftime("%Y%m%d")}': comparison_df[f'Inventory Value_{date2.strftime("%Y%m%d")}'].fillna(0).apply(format_currency_k)},
-            'Value Change': comparison_df['Value Change'].apply(format_currency_k)
-        ), use_container_width=True, hide_index=True)
+        # Apply assign first, then pass the result to st.dataframe
+        df_to_display = comparison_df[display_cols].reset_index().assign(**assign_kwargs)
+
+        st.dataframe(df_to_display, use_container_width=True, hide_index=True)
 
 
 # --- Streamlit UI Components ---
