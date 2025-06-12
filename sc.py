@@ -292,25 +292,21 @@ def generate_dummy_data():
         'isLoadedFromCSV': False,
     }
 
-# --- CSV Data Processing ---
+# --- CSV Data Processing (for single file) ---
 
-def process_csv_data(df):
-    """Processes pandas DataFrame from CSV to dashboard data structure."""
+def process_single_csv(df, current_date):
+    """Processes a single pandas DataFrame to a standardized format."""
     if df.empty:
-        # If CSV is empty, return an empty dataset that signals no data is loaded
-        return None
+        return pd.DataFrame() # Return empty DataFrame if input is empty
 
     # --- Rename and Prepare Columns ---
-    # Map CSV columns to expected dashboard column names
     column_mapping = {
         'Stock levels': 'On-hand Quantity',
         'Location': 'Warehouse',
         'SKU': 'Item',
         'Product type': 'Item Family',
-        'Price': 'Price', # Keep 'Price' as it's needed for calculation
+        'Price': 'Price',
     }
-
-    # Rename columns that exist in the mapping
     df = df.rename(columns=column_mapping)
 
     # Ensure critical numerical columns are numeric, handling errors
@@ -321,21 +317,13 @@ def process_csv_data(df):
             st.warning(f"Required column '{col}' not found in CSV. Some calculations might be affected.")
             df[col] = 0 # Default to 0 if column is missing
 
-    # Add a dummy 'Date' column if not present. For time series, a single date per row isn't ideal but necessary for now.
-    # In a real scenario, 'Date' would likely be part of the historical inventory data.
-    if 'Date' not in df.columns:
-        # Create a Series of today's date, converted to datetime objects for consistency
-        df['Date'] = pd.to_datetime([datetime.date.today()] * len(df))
-    else:
-        # Ensure the existing 'Date' column is converted to datetime
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        df.dropna(subset=['Date'], inplace=True) # Drop rows where Date parsing failed
+    # Assign the current date to all rows in this DataFrame
+    df['Date'] = pd.to_datetime(current_date)
 
     # Calculate Inventory Value
     df['Inventory Value'] = df['Price'] * df['On-hand Quantity']
 
     # Derive Safety Stock (as a simple heuristic, e.g., 20% of on-hand quantity)
-    # This is a placeholder; a real Safety Stock would come from business rules or demand forecasting.
     df['Safety Stock'] = df['On-hand Quantity'] * 0.2
     df['Safety Stock'] = df['Safety Stock'].apply(lambda x: max(0, x)) # Ensure non-negative
 
@@ -347,37 +335,57 @@ def process_csv_data(df):
     )
 
     # Derive Excess Stock Value
-    # Arbitrary threshold: if On-hand is more than 150% of Safety Stock, consider it excess.
-    # This is a placeholder; a real Excess Stock definition is business-specific.
     df['Excess Stock Value'] = np.where(
         df['On-hand Quantity'] > df['Safety Stock'] * 1.5,
         (df['On-hand Quantity'] - df['Safety Stock'] * 1.5) * df['Price'],
         0
     )
 
-
-    # --- KPIs ---
-    total_inventory_value = df['Inventory Value'].sum()
-    total_missing_stock_amount = df['Missing Stock Amount'].sum()
-    total_excess_stock_value = df['Excess Stock Value'].sum()
-    total_items_count = len(df)
-    total_positions_count = len(df) # Assuming each row is a position
-
-    # --- Inventory Status Breakdown ---
+    # Calculate Stock Status
     df['Calculated Stock Status'] = 'UNKNOWN'
     if 'Stock Status' in df.columns:
-        # Use existing 'Stock Status' if provided in CSV
         df['Calculated Stock Status'] = df['Stock Status'].astype(str).str.upper().str.replace(' ', '-')
     else:
-        # Derive if 'Stock Status' is not in CSV
         df.loc[df['On-hand Quantity'] <= 0, 'Calculated Stock Status'] = 'STOCK-OUT'
         df.loc[(df['On-hand Quantity'] > 0) & (df['On-hand Quantity'] < df['Safety Stock']), 'Calculated Stock Status'] = 'BELOW-SAFETY-STOCK'
         df.loc[df['Excess Stock Value'] > 0, 'Calculated Stock Status'] = 'OVER-STOCK'
-        # Any items not falling into the above categories are 'AT-STOCK'
         df.loc[df['Calculated Stock Status'] == 'UNKNOWN', 'Calculated Stock Status'] = 'AT-STOCK'
+    
+    return df[['Date', 'Item', 'Warehouse', 'On-hand Quantity', 'Price', 'Inventory Value', 
+               'Safety Stock', 'Missing Stock Amount', 'Excess Stock Value', 'Calculated Stock Status', 
+               'Product type', 'Item Family']] # Return necessary columns
 
+# --- Data Aggregation and Dashboard Data Generation (for all uploaded files) ---
 
-    inventory_status_breakdown = df['Calculated Stock Status'].value_counts().reset_index()
+def aggregate_and_generate_dashboard_data(all_dfs):
+    """
+    Aggregates data from multiple DataFrames (each with a date) and generates
+    the structured data needed for the dashboard.
+    """
+    if not all_dfs:
+        return None
+
+    # Concatenate all individual DataFrames into a single master DataFrame
+    master_df = pd.concat(all_dfs, ignore_index=True)
+    master_df['Date'] = pd.to_datetime(master_df['Date'])
+    master_df.sort_values(by='Date', inplace=True) # Ensure chronological order
+
+    # Get data for the latest date for overall KPIs and current status
+    latest_date = master_df['Date'].max()
+    current_df = master_df[master_df['Date'] == latest_date].copy()
+
+    if current_df.empty:
+        return None
+
+    # --- KPIs (from current_df) ---
+    total_inventory_value = current_df['Inventory Value'].sum()
+    total_missing_stock_amount = current_df['Missing Stock Amount'].sum()
+    total_excess_stock_value = current_df['Excess Stock Value'].sum()
+    total_items_count = len(current_df['Item'].unique()) # Count unique items
+    total_positions_count = len(current_df) # Total rows in current snapshot
+
+    # --- Inventory Status Breakdown (from current_df) ---
+    inventory_status_breakdown = current_df['Calculated Stock Status'].value_counts().reset_index()
     inventory_status_breakdown.columns = ['name', 'value']
     color_map = {
         'STOCK-OUT': '#DC2626',
@@ -395,37 +403,34 @@ def process_csv_data(df):
         'itemEvolution': [],
     }
 
-    # Group by month for inventory evolution
-    if not df.empty:
-        df['MonthYear'] = df['Date'].dt.to_period('M')
-        monthly_inventory = df.groupby('MonthYear')['Inventory Value'].sum().reset_index()
-        monthly_inventory['month'] = monthly_inventory['MonthYear'].dt.strftime('%b %y')
-        executive_summary_data['inventoryEvolution'] = monthly_inventory[['month', 'Inventory Value']].rename(columns={'Inventory Value': 'value'}).to_dict('records')
+    # Inventory Evolution (across all dates)
+    monthly_inventory = master_df.groupby(master_df['Date'].dt.to_period('M'))['Inventory Value'].sum().reset_index()
+    monthly_inventory['month'] = monthly_inventory['Date'].dt.strftime('%b %y')
+    executive_summary_data['inventoryEvolution'] = monthly_inventory[['month', 'Inventory Value']].rename(columns={'Inventory Value': 'value'}).to_dict('records')
 
-        monthly_items = df.groupby('MonthYear').size().reset_index(name='items')
-        monthly_items['month'] = monthly_items['MonthYear'].dt.strftime('%b %y')
-        executive_summary_data['itemEvolution'] = monthly_items[['month', 'items']].to_dict('records')
+    # Item Evolution (across all dates)
+    monthly_items = master_df.groupby(master_df['Date'].dt.to_period('M'))['Item'].nunique().reset_index(name='items')
+    monthly_items['month'] = monthly_items['Date'].dt.strftime('%b %y')
+    executive_summary_data['itemEvolution'] = monthly_items[['month', 'items']].to_dict('records')
 
-
-    # Warehouse Summary
-    warehouse_grouped = df.groupby('Warehouse').agg(
+    # Warehouse Summary (from current_df)
+    warehouse_grouped_current = current_df.groupby('Warehouse').agg(
         inventoryValue=('Inventory Value', 'sum'),
         excessStock=('Excess Stock Value', 'sum'),
         missingStock=('Missing Stock Amount', 'sum'),
-        positions=('Item', 'count') # Count items as positions for simplification
+        positions=('Item', 'count')
     ).reset_index()
-    executive_summary_data['warehouseSummary'] = warehouse_grouped.rename(columns={'Warehouse': 'name'}).to_dict('records')
+    executive_summary_data['warehouseSummary'] = warehouse_grouped_current.rename(columns={'Warehouse': 'name'}).to_dict('records')
 
-    # --- Warehouses Data ---
+    # --- Warehouses Data (from current_df) ---
     warehouses_data = []
-    for index, row in warehouse_grouped.iterrows():
-        # Corrected: Access 'Warehouse' column directly as it's the actual column name in warehouse_grouped DataFrame
-        wh_df = df[df['Warehouse'] == row['Warehouse']]
+    for index, row in warehouse_grouped_current.iterrows():
+        wh_df = current_df[current_df['Warehouse'] == row['Warehouse']]
         stock_breakdown_wh = wh_df['Calculated Stock Status'].value_counts().reset_index()
         stock_breakdown_wh.columns = ['name', 'value']
         stock_breakdown_wh['color'] = stock_breakdown_wh['name'].map(color_map)
         warehouses_data.append({
-            'name': row['Warehouse'], # Corrected: Use 'Warehouse' column from row Series
+            'name': row['Warehouse'],
             'inventoryValue': row['inventoryValue'],
             'excessStock': row['excessStock'],
             'missingStock': row['missingStock'],
@@ -433,132 +438,106 @@ def process_csv_data(df):
             'stockBreakdown': stock_breakdown_wh.to_dict('records')
         })
 
-    # --- Availability Data ---
+    # --- Availability Data (from current_df, forecasts are dummy as real-time data is needed) ---
     availability_data_processed = {
         'missingStockAmount': total_missing_stock_amount,
         'excessStockValue': total_excess_stock_value,
         'inventoryValue': total_inventory_value,
-        'stockOutForecast': [], # Hard to derive accurately from a static CSV, will use dummy values
-        'itemsToStockOutSoon': [], # Hard to derive, will use dummy values
-        'currentInventoryByItem': [],
-        'theoreticalOnHandQuantity': [] # Hard to derive, will use dummy values
+        'stockOutForecast': [
+            {'range': 'within 3 days', 'items': np.random.randint(1, 5)},
+            {'range': '4 to 10 days', 'items': np.random.randint(1, 5)},
+            {'range': '11 to 20 days', 'items': np.random.randint(1, 5)},
+            {'range': '21 to 30 days', 'items': np.random.randint(1, 5)},
+        ],
+        'itemsToStockOutSoon': [
+            {'name': 'Armanda ALW 400', 'days': np.random.randint(1, 30), 'forecast': 'STOCK-OUT'},
+            {'name': 'eBike 7', 'days': np.random.randint(1, 30), 'forecast': 'BELOW-SAFETY-STOCK'},
+        ],
+        'currentInventoryByItem': current_df.groupby('Item').agg(
+            onHand=('On-hand Quantity', 'first'),
+            status=('Calculated Stock Status', lambda x: x.mode()[0] if not x.empty else 'UNKNOWN')
+        ).reset_index().rename(columns={'Item': 'name'}).to_dict('records'),
+        'theoreticalOnHandQuantity': [{
+            'date': (latest_date + datetime.timedelta(days=i)).strftime('%b %d'),
+            'value': np.random.randint(100, 300)
+        } for i in range(20)],
     }
 
-    item_on_hand = df.groupby('Item').agg(
-        onHand=('On-hand Quantity', 'first'), # Assuming first value is representative
-        status=('Calculated Stock Status', lambda x: x.mode()[0] if not x.empty else 'UNKNOWN') # Most frequent status
-    ).reset_index().rename(columns={'Item': 'name'})
-    availability_data_processed['currentInventoryByItem'] = item_on_hand.to_dict('records')
-
-    # Dummy values for forecast as they need complex time-series analysis not in static CSV
-    today = datetime.date.today()
-    availability_data_processed['stockOutForecast'] = [
-        {'range': 'within 3 days', 'items': np.random.randint(1, 5)},
-        {'range': '4 to 10 days', 'items': np.random.randint(1, 5)},
-        {'range': '11 to 20 days', 'items': np.random.randint(1, 5)},
-        {'range': '21 to 30 days', 'items': np.random.randint(1, 5)},
-    ]
-    availability_data_processed['itemsToStockOutSoon'] = [
-        {'name': 'Item A', 'days': np.random.randint(1, 30), 'forecast': 'STOCK-OUT'},
-        {'name': 'Item B', 'days': np.random.randint(1, 30), 'forecast': 'BELOW-SAFETY-STOCK'},
-    ]
-    availability_data_processed['theoreticalOnHandQuantity'] = [{
-        'date': (today + datetime.timedelta(days=i)).strftime('%b %d'),
-        'value': np.random.randint(100, 300)
-    } for i in range(20)],
-
-
-    # --- Excess Stock Data ---
+    # --- Excess Stock Data (from current_df and master_df for evolution) ---
     excess_stock_data_processed = {
-        'percentOverStock': (df[df['Calculated Stock Status'] == 'OVER-STOCK'].shape[0] / total_items_count * 100) if total_items_count > 0 else 0,
+        'percentOverStock': (current_df[current_df['Calculated Stock Status'] == 'OVER-STOCK'].shape[0] / total_items_count * 100) if total_items_count > 0 else 0,
         'excessStockValue': total_excess_stock_value,
         'shareOfExcessStockValue': (total_excess_stock_value / total_inventory_value * 100) if total_inventory_value > 0 else 0,
         'excessStockEvolution': [],
         'highestExcessItems': [],
     }
+    monthly_excess = master_df.groupby(master_df['Date'].dt.to_period('M')).agg(
+        inventoryValue=('Inventory Value', 'sum'),
+        excessValue=('Excess Stock Value', 'sum')
+    ).reset_index()
+    monthly_excess['excessShare'] = (monthly_excess['excessValue'] / monthly_excess['inventoryValue'] * 100).fillna(0)
+    monthly_excess['month'] = monthly_excess['Date'].dt.strftime('%b %y')
+    excess_stock_data_processed['excessStockEvolution'] = monthly_excess[['month', 'inventoryValue', 'excessValue', 'excessShare']].to_dict('records')
 
-    if not df.empty:
-        monthly_excess = df.groupby('MonthYear').agg(
-            inventoryValue=('Inventory Value', 'sum'),
-            excessValue=('Excess Stock Value', 'sum')
-        ).reset_index()
-        monthly_excess['excessShare'] = (monthly_excess['excessValue'] / monthly_excess['inventoryValue'] * 100).fillna(0)
-        monthly_excess['month'] = monthly_excess['MonthYear'].dt.strftime('%b %y')
-        excess_stock_data_processed['excessStockEvolution'] = monthly_excess[['month', 'inventoryValue', 'excessValue', 'excessShare']].to_dict('records')
+    highest_excess_items = current_df.groupby('Item')['Excess Stock Value'].sum().sort_values(ascending=False).reset_index()
+    highest_excess_items.columns = ['name', 'excessValue']
+    total_excess_sum = highest_excess_items['excessValue'].sum()
+    highest_excess_items['share'] = (highest_excess_items['excessValue'] / total_excess_sum * 100).fillna(0) if total_excess_sum > 0 else 0
+    excess_stock_data_processed['highestExcessItems'] = highest_excess_items.head(6).to_dict('records')
 
-        highest_excess_items = df.groupby('Item')['Excess Stock Value'].sum().sort_values(ascending=False).reset_index()
-        highest_excess_items.columns = ['name', 'excessValue']
-        total_excess_sum = highest_excess_items['excessValue'].sum()
-        highest_excess_items['share'] = (highest_excess_items['excessValue'] / total_excess_sum * 100).fillna(0) if total_excess_sum > 0 else 0
-        excess_stock_data_processed['highestExcessItems'] = highest_excess_items.head(6).to_dict('records')
-
-
-    # --- Missing Stock Data ---
+    # --- Missing Stock Data (from current_df and master_df for evolution) ---
     missing_stock_data_processed = {
-        'percentBelowSafetyStock': (df[df['Calculated Stock Status'] == 'BELOW-SAFETY-STOCK'].shape[0] / total_items_count * 100) if total_items_count > 0 else 0,
-        'percentOutOfStock': (df[df['Calculated Stock Status'] == 'STOCK-OUT'].shape[0] / total_items_count * 100) if total_items_count > 0 else 0,
+        'percentBelowSafetyStock': (current_df[current_df['Calculated Stock Status'] == 'BELOW-SAFETY-STOCK'].shape[0] / total_items_count * 100) if total_items_count > 0 else 0,
+        'percentOutOfStock': (current_df[current_df['Calculated Stock Status'] == 'STOCK-OUT'].shape[0] / total_items_count * 100) if total_items_count > 0 else 0,
         'amountToRefill': total_missing_stock_amount,
         'evolutionOfMissingStockItems': [],
         'evolutionOfMissingStockAmount': [],
         'mostImportantMissingItems': [],
     }
-    if not df.empty:
-        monthly_missing_items = df[df['Calculated Stock Status'].isin(['STOCK-OUT', 'BELOW-SAFETY-STOCK'])].groupby('MonthYear').size().reset_index(name='items')
-        monthly_missing_items['month'] = monthly_missing_items['MonthYear'].dt.strftime('%b')
-        missing_stock_data_processed['evolutionOfMissingStockItems'] = monthly_missing_items[['month', 'items']].to_dict('records')
+    monthly_missing_items = master_df[master_df['Calculated Stock Status'].isin(['STOCK-OUT', 'BELOW-SAFETY-STOCK'])].groupby(master_df['Date'].dt.to_period('M')).size().reset_index(name='items')
+    monthly_missing_items['month'] = monthly_missing_items['Date'].dt.strftime('%b')
+    missing_stock_data_processed['evolutionOfMissingStockItems'] = monthly_missing_items[['month', 'items']].to_dict('records')
 
-        monthly_missing_amount = df.groupby('MonthYear')['Missing Stock Amount'].sum().reset_index()
-        monthly_missing_amount['month'] = monthly_missing_amount['MonthYear'].dt.strftime('%b')
-        missing_stock_data_processed['evolutionOfMissingStockAmount'] = monthly_missing_amount[['month', 'Missing Stock Amount']].rename(columns={'Missing Stock Amount': 'amount'}).to_dict('records')
+    monthly_missing_amount = master_df.groupby(master_df['Date'].dt.to_period('M'))['Missing Stock Amount'].sum().reset_index()
+    monthly_missing_amount['month'] = monthly_missing_amount['Date'].dt.strftime('%b')
+    missing_stock_data_processed['evolutionOfMissingStockAmount'] = monthly_missing_amount[['month', 'Missing Stock Amount']].rename(columns={'Missing Stock Amount': 'amount'}).to_dict('records')
 
-        most_important_missing_items = df.groupby('Item').agg(
-            amount=('Missing Stock Amount', 'sum'),
-            status=('Calculated Stock Status', lambda x: x.mode()[0] if not x.empty else 'UNKNOWN')
-        ).sort_values(by='amount', ascending=False).reset_index().rename(columns={'Item': 'name'})
-        missing_stock_data_processed['mostImportantMissingItems'] = most_important_missing_items[most_important_missing_items['amount'] > 0].head(5).to_dict('records')
+    most_important_missing_items = current_df.groupby('Item').agg(
+        amount=('Missing Stock Amount', 'sum'),
+        status=('Calculated Stock Status', lambda x: x.mode()[0] if not x.empty else 'UNKNOWN')
+    ).sort_values(by='amount', ascending=False).reset_index().rename(columns={'Item': 'name'})
+    missing_stock_data_processed['mostImportantMissingItems'] = most_important_missing_items[most_important_missing_items['amount'] > 0].head(5).to_dict('records')
 
-
-    # --- Historical Status Data ---
+    # --- Historical Status Data (from master_df) ---
     historical_status_data_processed = {
-        'stockStatusOverview': {
+        'stockStatusOverview': { # Based on current_df for consistency with other KPIs
             'stockOut': missing_stock_data_processed['percentOutOfStock'],
             'belowSafetyStock': missing_stock_data_processed['percentBelowSafetyStock'],
-            'atStock': (df[df['Calculated Stock Status'] == 'AT-STOCK'].shape[0] / total_items_count * 100) if total_items_count > 0 else 0,
+            'atStock': (current_df[current_df['Calculated Stock Status'] == 'AT-STOCK'].shape[0] / total_items_count * 100) if total_items_count > 0 else 0,
             'overStock': excess_stock_data_processed['percentOverStock'],
         },
         'evolutionInPositionStatus': [],
         'mostInventoryIssues': [],
     }
+    evolution_status_list = []
+    for item, group in master_df.groupby('Item'):
+        statuses_over_time = group.sort_values('Date')['Calculated Stock Status'].tolist()
+        evolution_status_list.append({'item': item, 'statuses': statuses_over_time})
+    historical_status_data_processed['evolutionInPositionStatus'] = evolution_status_list
 
-    if not df.empty:
-        # Simplified evolution in position status for display
-        evolution_status_list = []
-        for item, group in df.groupby('Item'):
-            statuses_over_time = group.sort_values('Date')['Calculated Stock Status'].tolist()
-            evolution_status_list.append({'item': item, 'statuses': statuses_over_time})
-        historical_status_data_processed['evolutionInPositionStatus'] = evolution_status_list
+    issue_items = current_df[current_df['Calculated Stock Status'].isin(['STOCK-OUT', 'BELOW-SAFETY-STOCK'])].groupby('Item').agg(
+        positions=('Item', 'count'),
+        status=('Calculated Stock Status', lambda x: x.mode()[0] if not x.empty else 'UNKNOWN')
+    ).sort_values(by='positions', ascending=False).reset_index().rename(columns={'Item': 'name'})
+    historical_status_data_processed['mostInventoryIssues'] = issue_items.head(5).to_dict('records')
 
-        # Most inventory issues
-        issue_items = df[df['Calculated Stock Status'].isin(['STOCK-OUT', 'BELOW-SAFETY-STOCK'])].groupby('Item').agg(
-            positions=('Item', 'count'),
-            status=('Calculated Stock Status', lambda x: x.mode()[0] if not x.empty else 'UNKNOWN')
-        ).sort_values(by='positions', ascending=False).reset_index().rename(columns={'Item': 'name'})
-        historical_status_data_processed['mostInventoryIssues'] = issue_items.head(5).to_dict('records')
+    # --- Stock Coverage Data (dummy) ---
+    stock_coverage_data_processed = generate_dummy_data()['stockCoverage']
 
-
-    # --- Stock Coverage Data ---
-    # This is highly conceptual and relies on very specific CSV columns not generally available.
-    # We will use dummy data or create a very simple structure.
-    stock_coverage_data_processed = {
-        'abcXyzClassification': generate_dummy_data()['stockCoverage']['abcXyzClassification'] # Use dummy for now
-    }
-    # If CSV had 'Consumption Volume', 'Consumption Stability', 'Class', 'Total Outflow Value', 'Num Items'
-    # we could process it here.
-
-    # --- Item Deep-dive Data (select first item from processed data for simplicity) ---
+    # --- Item Deep-dive Data (select first item from current_df for simplicity) ---
     item_deep_dive_data_processed = {}
-    if not df.empty:
-        first_item_row = df.iloc[0]
+    if not current_df.empty:
+        first_item_row = current_df.iloc[0]
         item_deep_dive_data_processed = {
             'selectedItem': first_item_row.get('Item', 'N/A'),
             'itemFamily': first_item_row.get('Item Family', 'N/A'),
@@ -568,33 +547,27 @@ def process_csv_data(df):
                 'excessStock': first_item_row.get('Excess Stock Value', 0),
                 'missingStock': first_item_row.get('Missing Stock Amount', 0),
             },
-            'warehouseBreakdown': warehouses_data, # Use the processed warehouse data
-            'dailyForecast': availability_data_processed['theoreticalOnHandQuantity'], # Use theoretical on hand as forecast
+            'warehouseBreakdown': warehouses_data, # Re-using current_df's warehouse breakdown
+            'dailyForecast': availability_data_processed['theoreticalOnHandQuantity'],
         }
     else:
         item_deep_dive_data_processed = generate_dummy_data()['itemDeepDive']
 
-
-    # --- Adhoc Analysis Data ---
+    # --- Adhoc Analysis Data (from master_df) ---
     adhoc_analysis_data_processed = {
-        'inventoryValueTrends': executive_summary_data['inventoryEvolution'], # Re-use
+        'inventoryValueTrends': executive_summary_data['inventoryEvolution'],
         'inventoryValueByItemFamily': [],
         'paretoAnalysis': [],
     }
+    item_family_value = master_df.groupby('Item Family')['Inventory Value'].sum().reset_index()
+    item_family_value.columns = ['name', 'value']
+    total_inv_value_adhoc = item_family_value['value'].sum()
+    item_family_value['share'] = (item_family_value['value'] / total_inv_value_adhoc * 100).fillna(0) if total_inv_value_adhoc > 0 else 0
+    adhoc_analysis_data_processed['inventoryValueByItemFamily'] = item_family_value.to_dict('records')
 
-    if not df.empty:
-        # Inventory Value by Item Family
-        item_family_value = df.groupby('Item Family')['Inventory Value'].sum().reset_index()
-        item_family_value.columns = ['name', 'value']
-        total_inv_value = item_family_value['value'].sum()
-        item_family_value['share'] = (item_family_value['value'] / total_inv_value * 100).fillna(0) if total_inv_value > 0 else 0
-        adhoc_analysis_data_processed['inventoryValueByItemFamily'] = item_family_value.to_dict('records')
-
-        # Pareto Analysis
-        pareto_items = df.groupby('Item')['Inventory Value'].sum().sort_values(ascending=False).reset_index()
-        pareto_items.columns = ['name', 'value']
-        adhoc_analysis_data_processed['paretoAnalysis'] = pareto_items.head(7).to_dict('records') # Top 7 items
-
+    pareto_items = master_df.groupby('Item')['Inventory Value'].sum().sort_values(ascending=False).reset_index()
+    pareto_items.columns = ['name', 'value']
+    adhoc_analysis_data_processed['paretoAnalysis'] = pareto_items.head(7).to_dict('records')
 
     return {
         'kpis': {
@@ -605,7 +578,7 @@ def process_csv_data(df):
         'inventoryStatus': {
             'totalItems': total_items_count,
             'totalPositions': total_positions_count,
-            'breakdown': inventory_status_breakdown.to_dict('records'), # This is already a list of dicts from .to_dict('records')
+            'breakdown': inventory_status_breakdown.to_dict('records'),
         },
         'executiveSummary': executive_summary_data,
         'warehouses': warehouses_data,
@@ -617,7 +590,79 @@ def process_csv_data(df):
         'itemDeepDive': item_deep_dive_data_processed,
         'adhocAnalysis': adhoc_analysis_data_processed,
         'isLoadedFromCSV': True,
+        'master_df': master_df, # Add the master DataFrame for day-to-day comparison
     }
+
+# --- New Content for Day-to-Day Comparison ---
+
+def DayToDayComparisonContent(data):
+    st.header("Day-to-Day Stock Comparison")
+
+    master_df = data.get('master_df')
+    if master_df is None or master_df.empty:
+        st.info("Please upload multiple CSV files with different dates to enable day-to-day comparison.")
+        return
+
+    available_dates = sorted(master_df['Date'].dt.date.unique())
+
+    if len(available_dates) < 2:
+        st.info("Upload at least two CSV files with different dates to perform a day-to-day comparison.")
+        return
+
+    st.subheader("Select Dates for Comparison")
+    col1, col2 = st.columns(2)
+    with col1:
+        date1 = st.selectbox("Select First Date", options=available_dates, index=0, key="date1_select")
+    with col2:
+        # Default to the last date if available, otherwise the second date
+        default_index_date2 = len(available_dates) - 1 if len(available_dates) > 1 else 0
+        date2 = st.selectbox("Select Second Date", options=available_dates, index=default_index_date2, key="date2_select")
+
+    if date1 and date2:
+        if date1 == date2:
+            st.warning("Please select two different dates for comparison.")
+            return
+
+        st.subheader(f"Stock Comparison: {date1} vs {date2}")
+
+        df_date1 = master_df[master_df['Date'].dt.date == date1].set_index(['Item', 'Warehouse'])
+        df_date2 = master_df[master_df['Date'].dt.date == date2].set_index(['Item', 'Warehouse'])
+
+        # Align and combine dataframes
+        comparison_df = df_date1.merge(
+            df_date2,
+            on=['Item', 'Warehouse'],
+            how='outer',
+            suffixes=(f'_{date1.strftime("%Y%m%d")}', f'_{date2.strftime("%Y%m%d")}')
+        )
+
+        qty_col1 = f'On-hand Quantity_{date1.strftime("%Y%m%d")}'
+        qty_col2 = f'On-hand Quantity_{date2.strftime("%Y%m%d")}'
+        
+        # Fill NaN for items not present on a specific date with 0 quantity
+        comparison_df[qty_col1] = comparison_df[qty_col1].fillna(0)
+        comparison_df[qty_col2] = comparison_df[qty_col2].fillna(0)
+
+        comparison_df['Quantity Change'] = comparison_df[qty_col2] - comparison_df[qty_col1]
+        comparison_df['Value Change'] = comparison_df[f'Inventory Value_{date2.strftime("%Y%m%d")}'].fillna(0) - comparison_df[f'Inventory Value_{date1.strftime("%Y%m%d")}'].fillna(0)
+
+        # Select relevant columns for display
+        display_cols = [
+            'Quantity Change',
+            'Value Change'
+        ]
+        
+        # Add original quantities for reference
+        if qty_col1 in comparison_df.columns:
+            display_cols.insert(0, qty_col1)
+        if qty_col2 in comparison_df.columns:
+            display_cols.insert(1, qty_col2)
+
+        st.dataframe(comparison_df[display_cols].reset_index().assign(
+            **{f'Inventory Value_{date1.strftime("%Y%m%d")}': comparison_df[f'Inventory Value_{date1.strftime("%Y%m%d")}'].fillna(0).apply(format_currency_k)},
+            **{f'Inventory Value_{date2.strftime("%Y%m%d")}': comparison_df[f'Inventory Value_{date2.strftime("%Y%m%d")}'].fillna(0).apply(format_currency_k)},
+            'Value Change': comparison_df['Value Change'].apply(format_currency_k)
+        ), use_container_width=True, hide_index=True)
 
 
 # --- Streamlit UI Components ---
@@ -628,23 +673,22 @@ def HomeContent(data):
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric(label="Inventory Value as of November 8, 2022", value=format_currency(data['kpis']['inventoryValue']))
+        st.metric(label="Inventory Value as of Latest Date", value=format_currency(data['kpis']['inventoryValue']))
     with col2:
         st.metric(label="Missing Stock Amount", value=format_currency(data['kpis']['missingStockAmount']), delta_color="inverse")
     with col3:
         st.metric(label="Excess Stock Value", value=format_currency(data['kpis']['excessStockValue']), delta_color="off")
 
-    st.subheader("Inventory Status as of November 8, 2022")
+    st.subheader(f"Inventory Status as of {data['master_df']['Date'].max().strftime('%B %d, %Y') if 'master_df' in data and not data['master_df'].empty else 'Latest Date'}")
     col_items, col_chart = st.columns([1, 3])
     with col_items:
         st.markdown(f"<h1 style='text-align: center; color: #3b82f6;'>{data['inventoryStatus']['totalItems']}</h1><p style='text-align: center;'>Items</p>", unsafe_allow_html=True)
     with col_chart:
-        # Ensure data['inventoryStatus']['breakdown'] is a list of dicts here
         fig = px.bar(data['inventoryStatus']['breakdown'], y='name', x='value', orientation='h',
                      color='name', color_discrete_map={item['name']: item['color'] for item in data['inventoryStatus']['breakdown']},
                      height=150, title="", labels={'value': '', 'name': ''})
         fig.update_layout(showlegend=False, margin=dict(l=0, r=0, t=0, b=0),
-                          xaxis_visible=False, yaxis_ticksuffix=" ") # Adjust yaxis ticksuffux to push labels to the right
+                          xaxis_visible=False, yaxis_ticksuffix=" ")
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     st.markdown(f"<p style='text-align: center; margin-top: -30px;'><h1 style='text-align: center; color: #10B981;'>{data['inventoryStatus']['totalPositions']}</h1>Positions</p>", unsafe_allow_html=True)
@@ -661,8 +705,6 @@ def HomeContent(data):
     cols = st.columns(len(actions))
     for i, (text, svg_path) in enumerate(actions):
         with cols[i]:
-            # Removed HTML from button label, keeping only the text.
-            # Custom styling for buttons in Streamlit typically requires custom components or careful CSS injection.
             st.button(text, key=f"action_btn_{text}", use_container_width=True, help=f"Click to {text}")
 
 
@@ -674,9 +716,8 @@ def ExecutiveSummaryContent(data):
         st.subheader("Inventory Status by Warehouse")
         for wh in data['executiveSummary']['warehouseSummary']:
             st.markdown(f"**{wh['name']}**")
-            # Ensure positions is not zero before division
             if wh['positions'] > 0:
-                st.progress(wh['positions'] / 50, text=f"{wh['positions']} positions") # Assuming max 50 for progress bar
+                st.progress(wh['positions'] / 50, text=f"{wh['positions']} positions")
             else:
                 st.progress(0, text="0 positions")
     with col2:
@@ -754,9 +795,8 @@ def AvailabilityContent(data):
         st.subheader("Forecast: Next Stock-out Items")
         for forecast in data['availability']['stockOutForecast']:
             st.write(f"{forecast['range']} ({forecast['items']} items)")
-            # Ensure items is not zero for division, also handle the case where forecast['items'] might be 0
             if forecast['items'] > 0:
-                st.progress(forecast['items'] / 10) # Max 10 items for progress bar
+                st.progress(forecast['items'] / 10)
             else:
                 st.progress(0)
     with col2:
@@ -1036,7 +1076,54 @@ def main():
 
         st.markdown("<h2 style='font-size: 1.25rem; font-weight: 600; color: #bfdbfe; margin-bottom: 1rem;'>Inventory</h2>", unsafe_allow_html=True)
 
-        uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"], help="Upload your supply chain data CSV to populate the dashboard.")
+        uploaded_files = st.file_uploader("Upload your CSV file(s)", type=["csv"], help="Upload your supply chain data CSV(s) to populate the dashboard. You can upload multiple files, each representing a different day's snapshot.", multiple_files=True)
+
+        # Initialize session state for file data if not present
+        if 'file_data_input' not in st.session_state:
+            st.session_state.file_data_input = []
+
+        # Logic to handle new uploads or preserve existing inputs
+        if uploaded_files:
+            # Check if current uploaded_files list is different from previous one
+            # This helps in preventing re-rendering date inputs for already processed files
+            if len(uploaded_files) != len(st.session_state.file_data_input) or \
+               any(file.name not in [f['name'] for f in st.session_state.file_data_input] for file in uploaded_files):
+                st.session_state.file_data_input = [] # Reset if files change
+                for file in uploaded_files:
+                    st.session_state.file_data_input.append({
+                        'name': file.name,
+                        'file_object': file,
+                        'date': datetime.date.today() # Default date
+                    })
+        else:
+            # If no files are currently uploaded, clear the state for file data
+            if 'file_data_input' in st.session_state and st.session_state.file_data_input:
+                st.session_state.file_data_input = []
+
+
+        processed_data_list = []
+        if st.session_state.file_data_input:
+            st.sidebar.subheader("Assign Dates to Uploaded Files")
+            for i, file_info in enumerate(st.session_state.file_data_input):
+                with st.sidebar:
+                    st.markdown(f"**{file_info['name']}**")
+                    # Use a unique key for each date input to prevent issues when file list changes
+                    selected_date = st.date_input(
+                        f"Date for {file_info['name']}",
+                        value=file_info['date'],
+                        key=f"date_input_{file_info['name']}_{i}"
+                    )
+                    st.session_state.file_data_input[i]['date'] = selected_date
+
+                try:
+                    df = pd.read_csv(file_info['file_object'])
+                    processed_df = process_single_csv(df, selected_date)
+                    if not processed_df.empty:
+                        processed_data_list.append(processed_df)
+                except Exception as e:
+                    st.error(f"Error processing {file_info['name']}: {e}")
+                    # Don't break, try to process other files
+
 
         # Navigation
         st.markdown("""
@@ -1065,40 +1152,30 @@ def main():
 
 
         current_nav_index = st.session_state.get('nav_index', 0)
-        nav_options = ['Home', 'Executive Summary', 'Warehouses', 'Availability', 'Excess Stock', 'Missing Stock', 'Historical Status', 'Stock Coverage', 'Item', 'Adhoc']
+        # Added 'Day-to-Day Comparison' to nav_options
+        nav_options = ['Home', 'Executive Summary', 'Warehouses', 'Availability', 'Excess Stock', 'Missing Stock', 'Historical Status', 'Stock Coverage', 'Item', 'Adhoc', 'Day-to-Day Comparison']
         selected_nav = st.radio("Navigation", nav_options, index=current_nav_index, key="main_nav")
 
 
     # --- Data Loading and Processing ---
     dashboard_data = None
-    if uploaded_file is not None:
+    if processed_data_list:
         try:
-            df = pd.read_csv(uploaded_file)
-            dashboard_data = process_csv_data(df)
+            dashboard_data = aggregate_and_generate_dashboard_data(processed_data_list)
             st.session_state['dashboard_data'] = dashboard_data
             st.session_state['nav_index'] = nav_options.index(selected_nav) # Keep current tab after upload
-            st.success("CSV loaded successfully! Displaying your data.")
+            if dashboard_data:
+                st.sidebar.markdown("<p style='color: #4CAF50; font-weight: bold; margin-top: 1rem;'>✅ Dashboard data updated from CSV(s)</p>", unsafe_allow_html=True)
+            else:
+                st.sidebar.markdown("<p style='color: #FFC107; font-weight: bold; margin-top: 1rem;'>⚠️ No valid data processed from CSV(s).</p>", unsafe_allow_html=True)
         except Exception as e:
-            st.error(f"Error processing CSV: {e}. Please ensure it's a valid CSV with expected columns. Dashboard content cleared.")
-            # Clear data from session state on error, forcing user to re-upload
+            st.error(f"Error aggregating CSV data: {e}. Dashboard content cleared.")
             if 'dashboard_data' in st.session_state:
                 del st.session_state['dashboard_data']
-            # dashboard_data will remain None, leading to the "Please upload" message below
     elif 'dashboard_data' in st.session_state:
-        # If no new file uploaded, but data exists from a previous successful upload
         dashboard_data = st.session_state['dashboard_data']
     else:
-        # No file uploaded yet, and no previous data in session state.
-        # dashboard_data remains None, which will trigger the "Please upload" message in the main content area.
-        pass # Do nothing, let dashboard_data remain None
-
-    # Display status of loaded data (sidebar)
-    if dashboard_data is None:
-        st.sidebar.markdown("<p style='color: #FFC107; font-weight: bold; margin-top: 1rem;'>⚠️ Please upload a CSV file to view the dashboard.</p>", unsafe_allow_html=True)
-    elif dashboard_data.get('isLoadedFromCSV', False):
-        st.sidebar.markdown("<p style='color: #4CAF50; font-weight: bold; margin-top: 1rem;'>✅ Displaying your CSV data</p>", unsafe_allow_html=True)
-    else: # This case should ideally not happen if logic is strict, but good for robustness
-        st.sidebar.markdown("<p style='color: #FFC107; font-weight: bold; margin-top: 1rem;'>⚠️ An issue occurred. Please upload a valid CSV.</p>", unsafe_allow_html=True)
+        st.sidebar.markdown("<p style='color: #FFC107; font-weight: bold; margin-top: 1rem;'>⚠️ Please upload CSV file(s) to view the dashboard.</p>", unsafe_allow_html=True)
 
 
     # --- Main Content Area ---
@@ -1106,7 +1183,7 @@ def main():
         if selected_nav == 'Home':
             HomeContent(dashboard_data)
         elif selected_nav == 'Executive Summary':
-            ExecutiveSummaryContent(dashboard_data) # Corrected: passed dashboard_data
+            ExecutiveSummaryContent(dashboard_data)
         elif selected_nav == 'Warehouses':
             WarehousesContent(dashboard_data)
         elif selected_nav == 'Availability':
@@ -1123,8 +1200,10 @@ def main():
             ItemContent(dashboard_data)
         elif selected_nav == 'Adhoc':
             AdhocContent(dashboard_data)
+        elif selected_nav == 'Day-to-Day Comparison':
+            DayToDayComparisonContent(dashboard_data)
     else:
-        st.info("Please upload your supply chain data CSV file using the uploader in the sidebar to populate the dashboard.")
+        st.info("Please upload your supply chain data CSV file(s) using the uploader in the sidebar to populate the dashboard.")
         st.info("No data is currently loaded.")
         st.image("https://placehold.co/800x400/eeeeee/000000?text=Upload+CSV+to+see+dashboard", caption="Dashboard awaiting CSV upload")
 
