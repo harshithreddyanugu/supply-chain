@@ -1082,41 +1082,40 @@ def main():
 
         st.markdown("<h2 style='font-size: 1.25rem; font-weight: 600; color: #bfdbfe; margin-bottom: 1rem;'>Inventory</h2>", unsafe_allow_html=True)
 
-        uploaded_files = st.file_uploader("Upload your CSV file(s)", type=["csv"], help="Upload your supply chain data CSV(s) to populate the dashboard. You can upload multiple files, each representing a different day's snapshot.", multiple_files=True)
-
-        # Initialize session state for file data if not present
+        # Updated to single file upload
+        uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"], help="Upload your supply chain data CSV to populate the dashboard. Only one file can be uploaded at a time.")
+        
+        # Initialize session state for single file data
         if 'file_data_input' not in st.session_state:
             st.session_state.file_data_input = []
 
-        # Create a temporary list to hold the new state of file data
-        new_file_data_input = []
-        if uploaded_files:
-            # Create a dictionary for quick lookup of existing file dates by name
-            existing_file_dates = {f['name']: f['date'] for f in st.session_state.file_data_input}
+        # Logic to handle single upload and preserve date
+        if uploaded_file is not None:
+            # Check if this is a new file or an update to the existing one
+            existing_file_info = next((f for f in st.session_state.file_data_input if f['name'] == uploaded_file.name), None)
 
-            for file in uploaded_files:
-                file_name = file.name
-                # If the file already exists in session state, use its previous date
-                # Otherwise, default to today's date
-                file_date = existing_file_dates.get(file_name, datetime.date.today())
-                
-                new_file_data_input.append({
-                    'name': file_name,
-                    'file_object': file,
-                    'date': file_date
-                })
-        
-        # Update the session state with the new list of file data
-        st.session_state.file_data_input = new_file_data_input
+            if existing_file_info:
+                # If file exists, update its file_object and keep its date
+                existing_file_info['file_object'] = uploaded_file
+            else:
+                # If new file, add it with today's date and clear previous files (since it's single file mode)
+                st.session_state.file_data_input = [{
+                    'name': uploaded_file.name,
+                    'file_object': uploaded_file,
+                    'date': datetime.date.today()
+                }]
+        else:
+            # If nothing is uploaded, clear the state to ensure no stale data
+            if not uploaded_file and st.session_state.file_data_input:
+                st.session_state.file_data_input = []
 
 
         processed_data_list = []
         if st.session_state.file_data_input:
-            st.sidebar.subheader("Assign Dates to Uploaded Files")
-            for i, file_info in enumerate(st.session_state.file_data_input):
+            st.sidebar.subheader("Assign Date to Uploaded File")
+            for i, file_info in enumerate(st.session_state.file_data_input): # This loop will now run at most once
                 with st.sidebar:
                     st.markdown(f"**{file_info['name']}**")
-                    # Use a unique key for each date input to prevent issues when file list changes
                     selected_date = st.date_input(
                         f"Date for {file_info['name']}",
                         value=file_info['date'],
