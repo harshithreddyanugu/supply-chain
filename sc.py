@@ -297,8 +297,8 @@ def generate_dummy_data():
 def process_csv_data(df):
     """Processes pandas DataFrame from CSV to dashboard data structure."""
     if df.empty:
-        st.warning("CSV data is empty or invalid. Displaying dummy data for demonstration.")
-        return generate_dummy_data()
+        # If CSV is empty, return an empty dataset that signals no data is loaded
+        return None
 
     # Ensure numeric columns are actually numeric, handling errors
     for col in ['Inventory Value', 'Total Value', 'On-hand Quantity', 'Stock Quantity',
@@ -1023,27 +1023,29 @@ def main():
             dashboard_data = process_csv_data(df)
             st.session_state['dashboard_data'] = dashboard_data
             st.session_state['nav_index'] = nav_options.index(selected_nav) # Keep current tab after upload
-            st.success("CSV loaded successfully!")
+            st.success("CSV loaded successfully! Displaying your data.")
         except Exception as e:
             st.error(f"Error processing CSV: {e}. Please ensure it's a valid CSV with expected columns. Dashboard content cleared.")
+            # Clear data from session state on error, forcing user to re-upload
             if 'dashboard_data' in st.session_state:
-                del st.session_state['dashboard_data'] # Clear previous data if error
-            dashboard_data = generate_dummy_data() # Fallback to dummy for demo purposes
-            dashboard_data['isLoadedFromCSV'] = False # Ensure flag is set for dummy data
+                del st.session_state['dashboard_data']
+            # dashboard_data will remain None, leading to the "Please upload" message below
     elif 'dashboard_data' in st.session_state:
         # If no new file uploaded, but data exists from a previous successful upload
         dashboard_data = st.session_state['dashboard_data']
     else:
-        # No file uploaded yet, and no previous data in session state
-        st.info("Please upload your supply chain data CSV file to view your own data. A demo dashboard is displayed below.")
-        dashboard_data = generate_dummy_data() # Display dummy data as initial demo
-        dashboard_data['isLoadedFromCSV'] = False # Ensure flag is set for dummy data
+        # No file uploaded yet, and no previous data in session state.
+        # dashboard_data remains None, which will trigger the "Please upload" message in the main content area.
+        pass # Do nothing, let dashboard_data remain None
 
-    # Display status of loaded data
-    if dashboard_data and dashboard_data.get('isLoadedFromCSV', False):
+    # Display status of loaded data (sidebar)
+    if dashboard_data is None:
+        st.sidebar.markdown("<p style='color: #FFC107; font-weight: bold; margin-top: 1rem;'>⚠️ Please upload a CSV file to view the dashboard.</p>", unsafe_allow_html=True)
+    elif dashboard_data.get('isLoadedFromCSV', False):
         st.sidebar.markdown("<p style='color: #4CAF50; font-weight: bold; margin-top: 1rem;'>✅ Displaying your CSV data</p>", unsafe_allow_html=True)
-    else:
-        st.sidebar.markdown("<p style='color: #FFC107; font-weight: bold; margin-top: 1rem;'>⚠️ Displaying demo data</p>", unsafe_allow_html=True)
+    else: # This case should ideally not happen if logic is strict, but good for robustness
+        st.sidebar.markdown("<p style='color: #FFC107; font-weight: bold; margin-top: 1rem;'>⚠️ An issue occurred. Please upload a valid CSV.</p>", unsafe_allow_html=True)
+
 
     # --- Main Content Area ---
     if dashboard_data:
@@ -1068,8 +1070,9 @@ def main():
         elif selected_nav == 'Adhoc':
             AdhocContent(dashboard_data)
     else:
-        # This block should ideally not be reached if generate_dummy_data is always called as fallback
-        st.info("Loading dashboard content...")
+        st.info("Please upload your supply chain data CSV file using the uploader in the sidebar to populate the dashboard.")
+        st.info("No data is currently loaded.")
+        st.image("https://placehold.co/800x400/eeeeee/000000?text=Upload+CSV+to+see+dashboard", caption="Dashboard awaiting CSV upload")
 
 
 if __name__ == "__main__":
